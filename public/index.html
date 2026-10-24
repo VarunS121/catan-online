@@ -5,13 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Catan Online</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏝️</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Nunito:wght@400;600;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- Home: create or join -->
   <section id="home" class="screen">
     <div class="home-card">
-      <h1>🏝️ Catan Online</h1>
+      <svg id="home-art" viewBox="-120 -120 240 240"></svg>
+      <h1>Catan Online</h1>
       <p class="sub">Private games for you and your friends — no accounts.</p>
       <label>Your name <input id="name" maxlength="16" placeholder="e.g. Varun" autocomplete="nickname"></label>
       <div class="split">
@@ -77,7 +81,11 @@
   <section id="game" class="screen hidden">
     <div class="board-wrap">
       <div id="banner"></div>
-      <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="board-area">
+        <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+        <svg id="fx-layer" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="roll-flash" class="roll-flash"></div>
+      </div>
       <div class="board-foot">
         <div id="dice" class="dice"></div>
         <div id="bank" class="bank"></div>
@@ -107,10 +115,10 @@
         <div id="tab-stats" class="tab hidden"></div>
         <div id="tab-help" class="tab hidden">
           <table class="costs">
-            <tr><td>Road</td><td>🌲🧱</td><td>Length 5+ chain → Longest Road (2 VP)</td></tr>
-            <tr><td>Settlement</td><td>🌲🧱🐑🌾</td><td>1 VP · 2 apart · on your road</td></tr>
-            <tr><td>City</td><td>🌾🌾⛰️⛰️⛰️</td><td>2 VP · double production</td></tr>
-            <tr><td>Dev card</td><td>🐑🌾⛰️</td><td>3 knights → Largest Army (2 VP)</td></tr>
+            <tr><td>Road</td><td><svg class="ri" viewBox="0 0 24 24"><use href="#i-wood"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-brick"/></svg></td><td>Length 5+ chain → Longest Road (2 VP)</td></tr>
+            <tr><td>Settlement</td><td><svg class="ri" viewBox="0 0 24 24"><use href="#i-wood"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-brick"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-sheep"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-wheat"/></svg></td><td>1 VP · 2 apart · on your road</td></tr>
+            <tr><td>City</td><td><svg class="ri" viewBox="0 0 24 24"><use href="#i-wheat"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-wheat"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-ore"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-ore"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-ore"/></svg></td><td>2 VP · double production</td></tr>
+            <tr><td>Dev card</td><td><svg class="ri" viewBox="0 0 24 24"><use href="#i-sheep"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-wheat"/></svg><svg class="ri" viewBox="0 0 24 24"><use href="#i-ore"/></svg></td><td>3 knights → Largest Army (2 VP)</td></tr>
           </table>
           <p class="sub">Roll 7: anyone holding more than <b id="help-limit">7</b> cards discards half, then the robber moves and steals. One development card per turn, never on the turn you bought it. You can only win on your own turn.</p>
         </div>
@@ -122,6 +130,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="net.js"></script>
+  <script src="art.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

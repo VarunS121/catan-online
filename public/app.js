@@ -2,8 +2,8 @@
 (function () {
   const $ = id => document.getElementById(id);
   const RES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
-  const ICON = { wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰️', desert: '🏜️', any: '❓' };
-  const HEX_COLOR = { wood: '#2f7d3b', brick: '#c45a32', sheep: '#8fc95a', wheat: '#e9bf3c', ore: '#8b95a1', desert: '#dcc79a' };
+  const ri = r => ART.icon(r);
+  const RES_NAME = { wood: 'Lumber', brick: 'Brick', sheep: 'Wool', wheat: 'Grain', ore: 'Ore' };
   const DEV = {
     knight: { name: 'Knight', icon: '⚔️', text: 'Move the robber and steal a card.' },
     roadBuilding: { name: 'Road Building', icon: '🛣️', text: 'Build 2 roads for free.' },
@@ -56,9 +56,11 @@
   const player = id => state.players.find(p => p.id === id);
   const nameOf = id => { const p = player(id); return p ? esc(p.name) : '?'; };
   const dot = id => { const p = player(id); return `<span class="dot" style="background:${p ? p.color : '#999'}"></span>`; };
+  // light player colours (white) need dark text on top
+  const light = hex => { const n = parseInt(hex.slice(1), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 > 180; };
   const handTotal = h => RES.reduce((s, r) => s + (h[r] || 0), 0);
   const canAfford = cost => state.hand && RES.every(r => (state.hand[r] || 0) >= (cost[r] || 0));
-  const cardsHtml = h => RES.filter(r => h[r]).map(r => `<span class="mini">${ICON[r]}${h[r] > 1 ? '×' + h[r] : ''}</span>`).join(' ');
+  const cardsHtml = h => RES.filter(r => h[r]).map(r => `<span class="mini">${ri(r)}${h[r] > 1 ? '×' + h[r] : ''}</span>`).join(' ');
 
   // ---------- sound (synthesised, no files) ----------
   let actx = null;
@@ -102,6 +104,21 @@
     if (!code) return toast('Enter a game code');
     emit('join', { name, playerId, code }, res => { if (res.ok) enterRoom(res.code); });
   };
+  // a little island on the home screen, drawn with the same tiles as the board
+  (function homeArt() {
+    const q = Math.sqrt(3), L = 40;
+    const tiles = [[0, 0, 'desert'], [q, 0, 'wheat', 6], [-q, 0, 'sheep', 9], [q / 2, -1.5, 'wood', 8], [-q / 2, -1.5, 'ore', 5], [q / 2, 1.5, 'brick', 10], [-q / 2, 1.5, 'sheep', 4]];
+    let out = `<g filter="url(#f-shadow)"><circle r="${L * 2.75}" fill="#d9c38a"/></g><circle r="${L * 2.6}" fill="#efdfb0"/>`;
+    for (const [x, y, t, n] of tiles) {
+      const cx = x * L, cy = y * L;
+      out += `<use href="#t-${t}" x="${cx - L}" y="${cy - L}" width="${2 * L}" height="${2 * L}"/>`;
+      if (n) out += `<circle cx="${cx}" cy="${cy}" r="11" fill="url(#g-token)"/><text x="${cx}" y="${cy + 4}" class="num small${n === 6 || n === 8 ? ' red' : ''}">${n}</text>`;
+    }
+    out += `<use href="#p-robber" x="-12" y="-22" width="24" height="36"/>`
+      + `<use href="#p-settlement" x="${(q / 2) * L - 14}" y="${-0.5 * L - 16}" width="28" height="30" color="#e23b3b"/>`
+      + `<use href="#p-city" x="${(-q / 2) * L - 18}" y="${0.5 * L - 21}" width="36" height="34" color="#2f6fde"/>`;
+    $('home-art').innerHTML = out;
+  })();
   $('code').addEventListener('keydown', e => { if (e.key === 'Enter') $('join').click(); });
   function enterRoom(code) {
     store.set('catan.room', code);
@@ -165,11 +182,13 @@
   }
   const pips = n => (n ? 6 - Math.abs(7 - n) : 0);
 
-  function settlementPath(x, y, color, city) {
-    if (city) {
-      return `<path d="M${x - 14} ${y + 10} V${y - 4} L${x - 7} ${y - 11} L${x} ${y - 4} H${x + 14} V${y + 10} Z" fill="${color}" stroke="#1b1b1b" stroke-width="2.2" stroke-linejoin="round"/>`;
-    }
-    return `<path d="M${x - 9} ${y + 8} V${y - 2} L${x} ${y - 11} L${x + 9} ${y - 2} V${y + 8} Z" fill="${color}" stroke="#1b1b1b" stroke-width="2.2" stroke-linejoin="round"/>`;
+  // what was on the board last render, so only new pieces animate in
+  let prevPieces = null, prevRobber = null, prevHand = null;
+
+  function pieceUse(x, y, color, city, cls) {
+    return city
+      ? `<use href="#p-city" class="piece ${cls}" x="${x - 18}" y="${y - 21}" width="36" height="34" color="${color}"/>`
+      : `<use href="#p-settlement" class="piece ${cls}" x="${x - 14}" y="${y - 16}" width="28" height="30" color="${color}"/>`;
   }
 
   function currentMode() {
@@ -185,55 +204,66 @@
   function renderBoard() {
     const s = state, b = s.board, svg = $('board');
     const xs = b.vertices.map(v => v.x).concat(b.ports.map(p => p.x)), ys = b.vertices.map(v => v.y).concat(b.ports.map(p => p.y));
-    const pad = 0.6;
+    const pad = 0.75;
     const minX = (Math.min(...xs) - pad) * S, minY = (Math.min(...ys) - pad) * S;
     const w = (Math.max(...xs) - Math.min(...xs) + 2 * pad) * S, h = (Math.max(...ys) - Math.min(...ys) + 2 * pad) * S;
-    svg.setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
+    const viewBox = `${minX} ${minY} ${w} ${h}`;
+    svg.setAttribute('viewBox', viewBox);
+    $('fx-layer').setAttribute('viewBox', viewBox);
     const m = currentMode();
     const legal = s.legal || {};
+    const animate = prevPieces && prevPieces.code === s.code;
     let out = '';
 
-    // sand coast under the land
-    out += b.hexes.map(hx => `<polygon points="${hexPoints(hx, 1.12)}" fill="#e8d7a8" stroke="#e8d7a8" stroke-width="10" stroke-linejoin="round"/>`).join('');
-    // ports
+    // sea, then the sand island with a soft shadow
+    out += `<rect x="${minX - w}" y="${minY - h}" width="${w * 3}" height="${h * 3}" fill="url(#waves)"/>`;
+    out += `<g filter="url(#f-shadow)">${b.hexes.map(hx => `<polygon points="${hexPoints(hx, 1.16)}" fill="#d9c38a" stroke="#d9c38a" stroke-width="14" stroke-linejoin="round"/>`).join('')}</g>`;
+    out += b.hexes.map(hx => `<polygon points="${hexPoints(hx, 1.08)}" fill="#efdfb0" stroke="#efdfb0" stroke-width="8" stroke-linejoin="round"/>`).join('');
+    // harbors: wooden piers out to a badge
     for (const p of b.ports) {
       const px = p.x * S, py = p.y * S;
       for (const vid of p.vertices) {
         const v = b.vertices[vid];
-        out += `<line x1="${px}" y1="${py}" x2="${v.x * S}" y2="${v.y * S}" stroke="#7a5532" stroke-width="5" stroke-linecap="round"/>`;
+        const x1 = v.x * S, y1 = v.y * S;
+        out += `<line x1="${px}" y1="${py}" x2="${x1}" y2="${y1}" stroke="#4a2f14" stroke-width="8" stroke-linecap="round"/>`
+          + `<line x1="${px}" y1="${py}" x2="${x1}" y2="${y1}" stroke="#a7744a" stroke-width="5" stroke-linecap="round" stroke-dasharray="5 2"/>`;
       }
       const label = p.type === 'any' ? '3:1' : '2:1';
-      out += `<g class="port"><circle cx="${px}" cy="${py}" r="17" fill="#f7eed6" stroke="#7a5532" stroke-width="2.5"/>`
-        + `<text x="${px}" y="${py - 2}" class="port-icon">${p.type === 'any' ? '⚓' : ICON[p.type]}</text>`
+      out += `<g class="port" filter="url(#f-soft)"><circle cx="${px}" cy="${py}" r="16" fill="url(#g-token)" stroke="#7a5532" stroke-width="2.5"/>`
+        + `<use href="#i-${p.type === 'any' ? 'anchor' : p.type}" x="${px - 7.5}" y="${py - 13}" width="15" height="15"/>`
         + `<text x="${px}" y="${py + 11}" class="port-text">${label}</text><title>${p.type === 'any' ? 'Any 3 identical for 1' : '2 ' + p.type + ' for 1'}</title></g>`;
     }
-    // hexes
+    // terrain tiles and number tokens
+    const R = S * 0.985;
+    const rolled = s.dice ? s.dice[0] + s.dice[1] : null;
     for (const hx of b.hexes) {
       const cx = hx.x * S, cy = hx.y * S;
       const clickable = m === 'robber' && legal.robber && legal.robber.includes(hx.id);
       out += `<g class="hex${clickable ? ' pick' : ''}" data-hex="${hx.id}">`
-        + `<polygon points="${hexPoints(hx, 0.97)}" fill="${HEX_COLOR[hx.resource]}" stroke="#00000033" stroke-width="2"/>`
-        + `<text x="${cx}" y="${cy - 22}" class="hex-icon">${ICON[hx.resource]}</text>`;
+        + `<use href="#t-${hx.resource}" x="${cx - R}" y="${cy - R}" width="${2 * R}" height="${2 * R}"/>`;
       if (hx.number) {
         const red = hx.number === 6 || hx.number === 8;
-        out += `<circle cx="${cx}" cy="${cy + 6}" r="17" fill="#f7eed6" stroke="#00000055" stroke-width="1.5"/>`
-          + `<text x="${cx}" y="${cy + 9}" class="num${red ? ' red' : ''}">${hx.number}</text>`;
+        const hot = rolled === hx.number && hx.id !== b.robber;
+        out += `<g filter="url(#f-soft)" class="token${hot ? ' hot' : ''}"><circle cx="${cx}" cy="${cy}" r="15.5" fill="url(#g-token)" stroke="#8a7650" stroke-width="1.2"/></g>`
+          + `<text x="${cx}" y="${cy + 4}" class="num${red ? ' red' : ''}">${hx.number}</text>`;
         const n = pips(hx.number);
-        for (let i = 0; i < n; i++) out += `<circle cx="${cx + (i - (n - 1) / 2) * 4.2}" cy="${cy + 16}" r="1.6" fill="${red ? '#c62828' : '#333'}"/>`;
+        for (let i = 0; i < n; i++) out += `<circle cx="${cx + (i - (n - 1) / 2) * 3.6}" cy="${cy + 9.5}" r="1.3" fill="${red ? '#c62828' : '#3a3a3a'}"/>`;
+        if (hot) out += `<polygon points="${hexPoints(hx, 0.97)}" class="hit"/>`;
       }
-      if (s.dice && hx.number === s.dice[0] + s.dice[1] && hx.id !== b.robber) out += `<polygon points="${hexPoints(hx, 0.97)}" class="hit"/>`;
+      if (clickable) out += `<polygon points="${hexPoints(hx, 0.9)}" class="pick-ring"/>`;
       out += `</g>`;
     }
-    // robber
-    const rh = b.hexes[b.robber];
-    out += `<g class="robber" transform="translate(${rh.x * S + 20},${rh.y * S - 2})"><ellipse cx="0" cy="14" rx="9" ry="3.5" fill="#0006"/><path d="M-8 13 Q-9 -2 -5 -6 A6 6 0 1 1 5 -6 Q9 -2 8 13 Z" fill="#2b2b2b" stroke="#000" stroke-width="1.5"/></g>`;
-    // roads
+    // roads (new ones draw themselves in)
+    const roadLen = Math.round(0.76 * S);
     s.roads.forEach((owner, eid) => {
       if (!owner) return;
       const e = b.edges[eid], a = b.vertices[e.a], c = b.vertices[e.b];
-      const x1 = a.x + (c.x - a.x) * 0.12, y1 = a.y + (c.y - a.y) * 0.12, x2 = a.x + (c.x - a.x) * 0.88, y2 = a.y + (c.y - a.y) * 0.88;
-      out += `<line x1="${x1 * S}" y1="${y1 * S}" x2="${x2 * S}" y2="${y2 * S}" stroke="#1b1b1b" stroke-width="10" stroke-linecap="round"/>`
-        + `<line x1="${x1 * S}" y1="${y1 * S}" x2="${x2 * S}" y2="${y2 * S}" stroke="${player(owner).color}" stroke-width="6" stroke-linecap="round"/>`;
+      const x1 = (a.x + (c.x - a.x) * 0.12) * S, y1 = (a.y + (c.y - a.y) * 0.12) * S, x2 = (a.x + (c.x - a.x) * 0.88) * S, y2 = (a.y + (c.y - a.y) * 0.88) * S;
+      const fresh = animate && prevPieces.roads[eid] !== owner;
+      const style = fresh ? ` class="road-new" style="--len:${roadLen}"` : '';
+      out += `<g${style}><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#141414" stroke-width="10.5" stroke-linecap="round"/>`
+        + `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${player(owner).color}" stroke-width="6.5" stroke-linecap="round"/>`
+        + `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#fff" stroke-opacity=".3" stroke-width="1.6" stroke-linecap="round" transform="translate(-.8 -1.2)"/></g>`;
     });
     // legal road spots
     if (m === 'road' && legal.road) {
@@ -242,12 +272,19 @@
         out += `<line class="spot-road" data-edge="${eid}" x1="${a.x * S}" y1="${a.y * S}" x2="${c.x * S}" y2="${c.y * S}"/>`;
       }
     }
-    // buildings
+    // buildings (new ones drop in)
     s.buildings.forEach((bd, vid) => {
       if (!bd) return;
       const v = b.vertices[vid];
-      out += settlementPath(v.x * S, v.y * S, player(bd.owner).color, bd.type === 'city');
+      const before = animate && prevPieces.buildings[vid];
+      const fresh = animate && (!before || before.type !== bd.type);
+      out += pieceUse(v.x * S, v.y * S, player(bd.owner).color, bd.type === 'city', fresh ? 'pop' : '');
     });
+    // robber, sliding from where it was
+    const rh = b.hexes[b.robber];
+    const rx = rh.x * S + 21, ry = rh.y * S - 4;
+    const from = animate && prevRobber && prevRobber !== `${rx},${ry}` ? prevRobber : `${rx},${ry}`;
+    out += `<g class="robber" data-to="${rx},${ry}" style="transform:translate(${from.replace(',', 'px,')}px)"><use href="#p-robber" x="-12" y="-20" width="24" height="36"/></g>`;
     // legal vertex spots
     const vSpots = m === 'settlement' ? legal.settlement : m === 'city' ? legal.city : null;
     if (vSpots) {
@@ -257,6 +294,58 @@
       }
     }
     svg.innerHTML = out;
+    const robber = svg.querySelector('.robber');
+    if (from !== `${rx},${ry}`) {
+      // flush the start position so the change below transitions (no rAF: it stalls in background tabs)
+      robber.getBoundingClientRect();
+      robber.style.transform = `translate(${rx}px,${ry}px)`;
+    }
+    prevRobber = `${rx},${ry}`;
+    prevPieces = { code: s.code, roads: s.roads.slice(), buildings: s.buildings.map(x => x && { ...x }) };
+  }
+
+  // resources fly from the producing hexes to each building after a roll
+  function flyProduction(sum) {
+    const s = state, b = s.board, layer = $('fx-layer');
+    if (!b || sum === 7) return;
+    let html = '';
+    for (const hx of b.hexes) {
+      if (hx.number !== sum || hx.id === b.robber) continue;
+      for (const vid of hx.vertices) {
+        const bd = s.buildings[vid];
+        if (!bd) continue;
+        const v = b.vertices[vid];
+        const n = bd.type === 'city' ? 2 : 1;
+        for (let k = 0; k < n; k++) {
+          html += `<use href="#i-${hx.resource}" class="fly" x="${hx.x * S - 11}" y="${hx.y * S - 11}" width="22" height="22"
+            style="--dx:${(v.x - hx.x) * S}px;--dy:${(v.y - hx.y) * S - 14}px;animation-delay:${k * 0.18}s"/>`;
+        }
+      }
+    }
+    layer.innerHTML = html;
+    clearTimeout(flyProduction.t);
+    flyProduction.t = setTimeout(() => (layer.innerHTML = ''), 2000);
+  }
+
+  function rollFlash(sum) {
+    const el = $('roll-flash');
+    el.textContent = sum;
+    el.className = 'roll-flash' + (sum === 7 ? ' seven' : '');
+    void el.offsetWidth;
+    el.classList.add('go');
+  }
+
+  function confetti() {
+    const box = document.createElement('div');
+    box.className = 'confetti';
+    const colors = state.players.map(p => p.color).concat(['#f2b544', '#ffffff']);
+    for (let i = 0; i < 140; i++) {
+      const c = document.createElement('i');
+      c.style.cssText = `left:${Math.random() * 100}%;background:${colors[i % colors.length]};animation-delay:${Math.random() * 1.2}s;animation-duration:${2.4 + Math.random() * 2}s;transform:rotate(${Math.random() * 360}deg)`;
+      box.appendChild(c);
+    }
+    document.body.appendChild(box);
+    setTimeout(() => box.remove(), 5500);
   }
 
   $('board').addEventListener('click', e => {
@@ -298,11 +387,16 @@
       const badges = (s.longestRoad === p.id ? '<span class="award" title="Longest Road">🛣️ +2</span>' : '')
         + (s.largestArmy === p.id ? '<span class="award" title="Largest Army">⚔️ +2</span>' : '');
       const vp = p.id === s.you && s.myVP != null ? s.myVP : p.vp;
-      return `<div class="pl${turn ? ' turn' : ''}${p.connected ? '' : ' off'}" style="--c:${p.color}">
-        <div class="pl-top"><span class="dot" style="background:${p.color}"></span><b>${esc(p.name)}</b>${p.id === s.you ? ' <em>you</em>' : ''}${p.connected ? '' : ' <em>offline</em>'}
-        <span class="vp" title="Victory points${p.id === s.you ? ' (including your hidden VP cards)' : ''}">${vp} VP</span></div>
-        <div class="pl-stats"><span title="Resource cards">🂠 ${p.cards}</span><span title="Development cards">📜 ${p.devCount}</span><span title="Knights played">⚔️ ${p.knights}</span><span title="Longest road">🛣️ ${p.roadLen}</span>${badges}</div>
-        ${s.phase === 'over' && p.devCards ? `<div class="pl-stats">${p.devCards.map(c => DEV[c].icon).join(' ')}</div>` : ''}
+      const pct = Math.min(100, (vp / s.settings.vpTarget) * 100);
+      return `<div class="pl${turn ? ' turn' : ''}${p.connected ? '' : ' off'}${p.id === s.winner ? ' won' : ''}" style="--c:${p.color}">
+        <div class="avatar${light(p.color) ? ' light' : ''}">${esc(p.name.slice(0, 1).toUpperCase())}</div>
+        <div class="pl-body">
+          <div class="pl-top"><b>${esc(p.name)}</b>${p.id === s.you ? ' <em>you</em>' : ''}${p.connected ? '' : ' <em class="offline">offline</em>'}
+            <span class="vp" title="Victory points${p.id === s.you ? ' (including your hidden VP cards)' : ''}">${vp}<small>/${s.settings.vpTarget}</small></span></div>
+          <div class="vp-bar"><i style="width:${pct}%"></i></div>
+          <div class="pl-stats"><span class="cardback" title="Resource cards">${p.cards}</span><span class="cardback dev" title="Development cards">${p.devCount}</span><span title="Knights played">⚔️ ${p.knights}</span><span title="Longest road">🛣️ ${p.roadLen}</span>${badges}</div>
+          ${s.phase === 'over' && p.devCards ? `<div class="pl-stats">${p.devCards.map(c => DEV[c].icon).join(' ')}</div>` : ''}
+        </div>
       </div>`;
     }).join('');
   }
@@ -311,7 +405,10 @@
     const s = state;
     if (s.spectator) { $('me').innerHTML = '<p class="sub">You are watching this game.</p>'; return; }
     const rates = s.rates;
-    $('hand').innerHTML = RES.map(r => `<div class="card res-${r}" title="${r} — bank rate ${rates[r]}:1"><span class="ic">${ICON[r]}</span><span class="n">${s.hand[r]}</span><span class="rate">${rates[r]}:1</span></div>`).join('');
+    const gained = r => prevHand && prevHand.code === s.code && s.hand[r] > prevHand.hand[r];
+    $('hand').innerHTML = RES.map(r => `<div class="card res-${r}${s.hand[r] ? '' : ' empty'}${gained(r) ? ' gain' : ''}" title="${RES_NAME[r]} — bank rate ${rates[r]}:1">
+      <span class="ic">${ri(r)}</span><span class="n">${s.hand[r]}</span><span class="rate${rates[r] < 4 ? ' port' : ''}">${rates[r]}:1</span><span class="nm">${RES_NAME[r]}</span></div>`).join('');
+    prevHand = { code: s.code, hand: { ...s.hand } };
     const counts = {};
     for (const c of s.dev) {
       counts[c.type] = counts[c.type] || { n: 0, playable: false };
@@ -327,14 +424,15 @@
     const mine = s.actor === s.you;
     const canBuild = mine && (s.phase === 'main' || s.phase === 'special');
     const L = s.legal || {};
-    const btn = (id, label, enabled, cls = '', title = '') => `<button id="${id}" class="${cls}${mode && id === 'b-' + mode ? ' on' : ''}" ${enabled ? '' : 'disabled'} title="${title}">${label}</button>`;
+    const costOf = c => `<span class="cost">${RES.flatMap(r => Array(c[r] || 0).fill(ri(r))).join('')}</span>`;
+    const btn = (id, label, enabled, cls = '', cost = null) => `<button id="${id}" class="${cls}${cost ? ' build' : ''}${mode && id === 'b-' + mode ? ' on' : ''}" ${enabled ? '' : 'disabled'}><span>${label}</span>${cost ? costOf(cost) : ''}</button>`;
     let html = '';
     if (s.phase === 'roll' && mine) html += btn('b-roll', '🎲 Roll dice', true, 'primary big');
     if (s.phase !== 'roll' && s.phase !== 'setup' || !mine) {
-      html += btn('b-road', '🛣️ Road', canBuild && canAfford(s.costs.road) && L.road && L.road.length && player(s.you).pieces.road > 0, '', '🌲🧱');
-      html += btn('b-settlement', '🏠 Settlement', canBuild && canAfford(s.costs.settlement) && L.settlement && L.settlement.length && player(s.you).pieces.settlement > 0, '', '🌲🧱🐑🌾');
-      html += btn('b-city', '🏰 City', canBuild && canAfford(s.costs.city) && L.city && L.city.length && player(s.you).pieces.city > 0, '', '🌾🌾⛰️⛰️⛰️');
-      html += btn('b-dev', '📜 Dev card', canBuild && canAfford(s.costs.dev) && s.devLeft > 0, '', '🐑🌾⛰️');
+      html += btn('b-road', '🛣️ Road', canBuild && canAfford(s.costs.road) && L.road && L.road.length && player(s.you).pieces.road > 0, '', s.costs.road);
+      html += btn('b-settlement', '🏠 Settlement', canBuild && canAfford(s.costs.settlement) && L.settlement && L.settlement.length && player(s.you).pieces.settlement > 0, '', s.costs.settlement);
+      html += btn('b-city', '🏰 City', canBuild && canAfford(s.costs.city) && L.city && L.city.length && player(s.you).pieces.city > 0, '', s.costs.city);
+      html += btn('b-dev', '📜 Dev card', canBuild && canAfford(s.costs.dev) && s.devLeft > 0, '', s.costs.dev);
       if (s.phase === 'main') html += btn('b-trade', tradeOpen ? '✖ Close trade' : '🤝 Trade', !s.spectator, tradeOpen ? 'on' : '');
       if (canBuild) html += btn('b-end', s.phase === 'special' ? '⏭ Pass' : '⏭ End turn', true, 'primary');
     }
@@ -365,7 +463,7 @@
     panel.classList.toggle('hidden', !show);
     if (!show) return;
     const active = s.current === s.you;
-    const row = side => RES.map(r => `<div class="step"><span>${ICON[r]}</span><button data-side="${side}" data-r="${r}" data-d="-1">−</button><b>${trade[side][r] || 0}</b><button data-side="${side}" data-r="${r}" data-d="1">+</button></div>`).join('');
+    const row = side => RES.map(r => `<div class="step">${ri(r)}<button data-side="${side}" data-r="${r}" data-d="-1">−</button><b>${trade[side][r] || 0}</b><button data-side="${side}" data-r="${r}" data-d="1">+</button></div>`).join('');
     const others = s.players.filter(p => p.id !== s.you);
     panel.innerHTML = `<h4>Trade ${active ? '' : 'with ' + nameOf(s.current)}</h4>
       <div class="trade-row"><span class="lbl">You give</span>${row('give')}</div>
@@ -376,7 +474,7 @@
         ${active ? '<button id="t-bank">Trade with bank</button>' : ''}
         <button id="t-clear" class="ghost">Clear</button>
       </div>
-      ${active ? `<p class="sub">Bank rates: ${RES.map(r => `${ICON[r]} ${s.rates[r]}:1`).join(' · ')}</p>` : ''}`;
+      ${active ? `<p class="sub">Bank rates: ${RES.map(r => `<span class="rate-chip">${ri(r)} ${s.rates[r]}:1</span>`).join('')}</p>` : ''}`;
   }
   $('trade').addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
@@ -436,14 +534,14 @@
   function renderDice() {
     const s = state, el = $('dice');
     if (!s.dice) { el.innerHTML = ''; return; }
-    const face = n => `<div class="die">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `<i class="${PIPS[n].includes(i) ? 'p' : ''}"></i>`).join('')}</div>`;
-    el.innerHTML = face(s.dice[0]) + face(s.dice[1]) + `<span class="sum${s.dice[0] + s.dice[1] === 7 ? ' seven' : ''}">${s.dice[0] + s.dice[1]}</span>`;
+    const face = (n, cls) => `<div class="die ${cls}">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => `<i class="${PIPS[n].includes(i) ? 'p' : ''}"></i>`).join('')}</div>`;
+    el.innerHTML = face(s.dice[0], 'ivory') + face(s.dice[1], 'red') + `<span class="sum${s.dice[0] + s.dice[1] === 7 ? ' seven' : ''}">${s.dice[0] + s.dice[1]}</span>`;
   }
   const PIPS = { 1: [5], 2: [1, 9], 3: [1, 5, 9], 4: [1, 3, 7, 9], 5: [1, 3, 5, 7, 9], 6: [1, 3, 4, 6, 7, 9] };
 
   function renderBank() {
     const s = state;
-    const bank = s.bank ? RES.map(r => `<span title="${r} left in the bank">${ICON[r]}${s.bank[r]}</span>`).join('') : '<span title="Bank card counts are hidden in this game">hidden</span>';
+    const bank = s.bank ? RES.map(r => `<span title="${RES_NAME[r]} left in the bank">${ri(r)}${s.bank[r]}</span>`).join('') : '<span title="Bank card counts are hidden in this game">hidden</span>';
     $('bank').innerHTML = `<span title="Bank">🏦</span>` + bank + `<span title="Development cards left">📜${s.devLeft}</span><span title="Points to win">🏆${s.settings.vpTarget}</span>`;
     $('help-limit').textContent = s.settings.discardLimit;
   }
@@ -484,7 +582,7 @@
     return `<div class="picker">${RES.map(r => {
       const n = selected[r] || 0;
       const lim = limitByHand ? state.hand[r] : 9;
-      return `<div class="step big"><span>${ICON[r]}</span><button data-pr="${r}" data-d="-1" ${n ? '' : 'disabled'}>−</button><b>${n}</b><button data-pr="${r}" data-d="1" ${n < lim && handTotal(selected) < max ? '' : 'disabled'}>+</button>${limitByHand ? `<small>of ${state.hand[r]}</small>` : ''}</div>`;
+      return `<div class="step big">${ri(r)}<span class="rn">${RES_NAME[r]}</span><button data-pr="${r}" data-d="-1" ${n ? '' : 'disabled'}>−</button><b>${n}</b><button data-pr="${r}" data-d="1" ${n < lim && handTotal(selected) < max ? '' : 'disabled'}>+</button>${limitByHand ? `<small>of ${state.hand[r]}</small>` : ''}</div>`;
     }).join('')}</div>`;
   }
 
@@ -503,7 +601,7 @@
       html = `<h3>🎁 Year of Plenty — pick 2 resources</h3>${resPicker(modalSel, 2, false)}
         <button class="primary" id="m-ok" ${handTotal(modalSel) === 2 ? '' : 'disabled'}>Take them</button><button class="ghost" id="m-cancel">Cancel</button>`;
     } else if (want === 'monopoly') {
-      html = `<h3>💰 Monopoly — which resource?</h3><div class="choices">${RES.map(r => `<button data-mono="${r}">${ICON[r]} ${r}</button>`).join('')}</div><button class="ghost" id="m-cancel">Cancel</button>`;
+      html = `<h3>💰 Monopoly — which resource?</h3><div class="choices">${RES.map(r => `<button data-mono="${r}">${ri(r)} ${RES_NAME[r]}</button>`).join('')}</div><button class="ghost" id="m-cancel">Cancel</button>`;
     } else if (want === 'steal') {
       html = `<h3>Steal from…</h3><div class="choices">${s.stealCandidates.map(id => `<button data-steal="${id}">${dot(id)} ${nameOf(id)} (${player(id).cards} cards)</button>`).join('')}</div>`;
     } else if (want === 'over') {
@@ -560,9 +658,15 @@
   // ---------- effects ----------
   net.on('fx', fx => {
     if (!state) return;
-    if (fx.type === 'roll') { sounds.dice(); $('dice').classList.remove('roll'); void $('dice').offsetWidth; $('dice').classList.add('roll'); }
+    if (fx.type === 'roll') {
+      sounds.dice();
+      $('dice').classList.remove('roll'); void $('dice').offsetWidth; $('dice').classList.add('roll');
+      const sum = fx.dice[0] + fx.dice[1];
+      rollFlash(sum);
+      setTimeout(() => flyProduction(sum), 500);
+    }
     else if (fx.type === 'build') sounds.build();
-    else if (fx.type === 'win') sounds.win();
+    else if (fx.type === 'win') { sounds.win(); confetti(); }
     else if (fx.type === 'steal' && fx.from === state.you) toast(`${nameOf(fx.to)} robbed you!`);
   });
 

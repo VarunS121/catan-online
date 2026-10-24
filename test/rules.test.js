@@ -355,8 +355,9 @@ test('timeouts resolve every phase: with nobody acting, each timeout moves the g
       if (g.phase === 'roll' && step % 7 === 0) {
         const p = g.players[step % n];
         for (const r of ['wood', 'brick', 'sheep', 'wheat', 'ore']) if (g.bank[r] >= 2) { g.bank[r] -= 2; p.hand[r] += 2; }
-        if (step % 21 === 0) g.cur().dev.push({ type: 'roadBuilding', turn: 0 });
       }
+      // until free roads have come up, give the roller a Road Building card whenever they have room to build
+      if (g.phase === 'roll' && !seen.has('roadBuilding') && g.cur().pieces.road > 0 && g.legalRoads(g.cur().id).length) g.cur().dev.push({ type: 'roadBuilding', turn: 0 });
       if (g.phase === 'roll' && g.cur().dev.some(c => c.type === 'roadBuilding') && !g.devPlayed) g.act(g.cur().id, 'playDev', { card: 'roadBuilding' });
       seen.add(g.phase);
       const before = g.timerKey();
