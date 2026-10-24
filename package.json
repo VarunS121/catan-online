@@ -1,0 +1,16 @@
+{
+  "name": "catan-online",
+  "version": "1.0.0",
+  "description": "Private real-time Catan (3-4 and 5-6 players) for you and your friends",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/rules.test.js && node test/sim.js && node test/socket.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

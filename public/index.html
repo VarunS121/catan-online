@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Catan Online</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏝️</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Home: create or join -->
+  <section id="home" class="screen">
+    <div class="home-card">
+      <h1>🏝️ Catan Online</h1>
+      <p class="sub">Private games for you and your friends — no accounts.</p>
+      <label>Your name <input id="name" maxlength="16" placeholder="e.g. Varun" autocomplete="nickname"></label>
+      <div class="split">
+        <div class="box">
+          <h3>New game</h3>
+          <div class="seg" id="size-pick">
+            <button data-size="base" class="on">3–4 players</button>
+            <button data-size="extended">5–6 players</button>
+          </div>
+          <button id="create" class="primary">Create game</button>
+        </div>
+        <div class="box">
+          <h3>Join a game</h3>
+          <input id="code" maxlength="5" placeholder="CODE" autocomplete="off">
+          <button id="join" class="primary">Join</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Waiting room -->
+  <section id="lobby" class="screen hidden">
+    <div class="home-card">
+      <h2>Game <span id="lobby-code" class="code"></span></h2>
+      <button id="invite" class="ghost">🔗 Copy invite link</button>
+      <ul id="lobby-players"></ul>
+      <div class="row"><span>Your colour</span><div id="color-pick" class="colors"></div></div>
+      <div id="host-settings">
+        <div class="row"><span>Board</span>
+          <div class="seg" id="lobby-size">
+            <button data-size="base">3–4 players</button>
+            <button data-size="extended">5–6 players</button>
+          </div>
+        </div>
+        <div class="row"><span>Points to win</span>
+          <div class="seg" id="lobby-vp">
+            <button data-vp="8">8</button><button data-vp="10">10</button><button data-vp="12">12</button><button data-vp="14">14</button>
+          </div>
+        </div>
+      </div>
+      <p id="lobby-note" class="sub"></p>
+      <button id="start" class="primary">Start game</button>
+      <button id="leave-lobby" class="ghost">Leave</button>
+    </div>
+  </section>
+
+  <!-- Game -->
+  <section id="game" class="screen hidden">
+    <div class="board-wrap">
+      <div id="banner"></div>
+      <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="board-foot">
+        <div id="dice" class="dice"></div>
+        <div id="bank" class="bank"></div>
+      </div>
+    </div>
+    <aside class="side">
+      <div id="players"></div>
+      <div id="me" class="panel">
+        <div id="hand" class="hand"></div>
+        <div id="devcards" class="devcards"></div>
+        <div id="actions" class="actions"></div>
+      </div>
+      <div id="trade" class="panel hidden"></div>
+      <div id="offers"></div>
+      <div class="panel tabs-panel">
+        <div class="tabs">
+          <button data-tab="log" class="on">Log</button>
+          <button data-tab="chat">Chat <span id="chat-badge" class="badge hidden"></span></button>
+          <button data-tab="stats">Dice stats</button>
+          <button data-tab="help">Costs</button>
+        </div>
+        <div id="tab-log" class="tab"></div>
+        <div id="tab-chat" class="tab hidden">
+          <div id="chat-list"></div>
+          <form id="chat-form"><input id="chat-input" maxlength="300" placeholder="Say something…" autocomplete="off"><button>Send</button></form>
+        </div>
+        <div id="tab-stats" class="tab hidden"></div>
+        <div id="tab-help" class="tab hidden">
+          <table class="costs">
+            <tr><td>Road</td><td>🌲🧱</td><td>Length 5+ chain → Longest Road (2 VP)</td></tr>
+            <tr><td>Settlement</td><td>🌲🧱🐑🌾</td><td>1 VP · 2 apart · on your road</td></tr>
+            <tr><td>City</td><td>🌾🌾⛰️⛰️⛰️</td><td>2 VP · double production</td></tr>
+            <tr><td>Dev card</td><td>🐑🌾⛰️</td><td>3 knights → Largest Army (2 VP)</td></tr>
+          </table>
+          <p class="sub">Roll 7: anyone holding 8+ cards discards half, then the robber moves and steals. One development card per turn, never on the turn you bought it. You can only win on your own turn.</p>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <div id="modal" class="modal hidden"><div class="modal-card" id="modal-card"></div></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="net.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
