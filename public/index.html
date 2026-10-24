@@ -51,6 +51,21 @@
             <button data-vp="8">8</button><button data-vp="10">10</button><button data-vp="12">12</button><button data-vp="14">14</button>
           </div>
         </div>
+        <div class="row"><span>Turn timer</span>
+          <div class="seg" id="lobby-time">
+            <button data-time="0">Off</button><button data-time="60">1m</button><button data-time="90">1½m</button><button data-time="120">2m</button><button data-time="180">3m</button><button data-time="300">5m</button>
+          </div>
+        </div>
+        <div class="row"><span>On a 7, discard if holding more than</span>
+          <div class="seg" id="lobby-discard">
+            <button data-limit="7">7</button><button data-limit="8">8</button><button data-limit="9">9</button><button data-limit="10">10</button><button data-limit="12">12</button>
+          </div>
+        </div>
+        <div class="row"><span>Bank card counts</span>
+          <div class="seg" id="lobby-bank">
+            <button data-hide="0">Shown</button><button data-hide="1">Hidden</button>
+          </div>
+        </div>
       </div>
       <p id="lobby-note" class="sub"></p>
       <button id="start" class="primary">Start game</button>
@@ -97,7 +112,7 @@
             <tr><td>City</td><td>🌾🌾⛰️⛰️⛰️</td><td>2 VP · double production</td></tr>
             <tr><td>Dev card</td><td>🐑🌾⛰️</td><td>3 knights → Largest Army (2 VP)</td></tr>
           </table>
-          <p class="sub">Roll 7: anyone holding 8+ cards discards half, then the robber moves and steals. One development card per turn, never on the turn you bought it. You can only win on your own turn.</p>
+          <p class="sub">Roll 7: anyone holding more than <b id="help-limit">7</b> cards discards half, then the robber moves and steals. One development card per turn, never on the turn you bought it. You can only win on your own turn.</p>
         </div>
       </div>
     </aside>

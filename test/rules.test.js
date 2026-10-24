@@ -304,4 +304,71 @@ test('base board geometry', () => {
   for (const h of g.board.hexes) if (red(h)) assert(h.neighbors.every(n => !red(g.board.hexes[n])));
 });
 
+test('discard limit setting', () => {
+  const g = fresh();
+  g.settings.discardLimit = 9;
+  give(g, 'p1', { wood: 9 });   // 9 is not more than 9 → safe
+  give(g, 'p2', { ore: 10 });   // 10 → discard 5
+  g.phase = 'roll';
+  g.startSeven();
+  assert.deepStrictEqual(g.discards, { p2: 5 });
+});
+
+test('host settings are validated; hidden bank is not sent to players', () => {
+  const g = new Game('T', { size: 'base' });
+  g.addPlayer('a', 'A'); g.addPlayer('b', 'B');
+  assert(g.configure('b', { turnTime: 60 }), 'only host');
+  assert.strictEqual(g.configure('a', { turnTime: 90, discardLimit: 10, hideBank: true }), null);
+  g.configure('a', { turnTime: 45, discardLimit: 3 }); // not allowed values are ignored
+  assert.deepStrictEqual([g.settings.turnTime, g.settings.discardLimit, g.settings.hideBank], [90, 10, true]);
+  g.start('a');
+  const v = g.view('a');
+  assert.strictEqual(v.bank, null);
+  assert(v.timeLeft > 89000 && v.timeLeft <= 90000);
+  g.destroy();
+});
+
+test('main-phase countdown is not reset by playing a card', () => {
+  const g = fresh();
+  g.settings.turnTime = 60;
+  g.syncTimer();
+  const first = g.timer.deadline;
+  P(g, 0).dev.push({ type: 'roadBuilding', turn: 0 });
+  g.vertexBuilding[5] = { owner: 'p0', type: 'settlement' };
+  g.act('p0', 'playDev', { card: 'roadBuilding' });
+  g.act('p0', 'build', { kind: 'road', at: g.legalRoads('p0')[0] });
+  g.act('p0', 'build', { kind: 'road', at: g.legalRoads('p0')[0] });
+  assert.strictEqual(g.phase, 'main');
+  assert(g.timer.deadline <= first + 50, 'same deadline as before the card');
+  g.destroy();
+});
+
+test('timeouts resolve every phase: with nobody acting, each timeout moves the game on', () => {
+  for (const [size, n] of [['base', 4], ['extended', 6]]) {
+    const g = new Game('T', { size, turnTime: 60 });
+    for (let i = 0; i < n; i++) g.addPlayer('p' + i, 'P' + i);
+    g.start('p0');
+    const seen = new Set();
+    for (let step = 0; step < 3000; step++) {
+      seen.add(g.phase);
+      // hand out cards now and then so discards, steals and free roads all come up
+      if (g.phase === 'roll' && step % 7 === 0) {
+        const p = g.players[step % n];
+        for (const r of ['wood', 'brick', 'sheep', 'wheat', 'ore']) if (g.bank[r] >= 2) { g.bank[r] -= 2; p.hand[r] += 2; }
+        if (step % 21 === 0) g.cur().dev.push({ type: 'roadBuilding', turn: 0 });
+      }
+      if (g.phase === 'roll' && g.cur().dev.some(c => c.type === 'roadBuilding') && !g.devPlayed) g.act(g.cur().id, 'playDev', { card: 'roadBuilding' });
+      seen.add(g.phase);
+      const before = g.timerKey();
+      g.onTimeout();
+      assert.notStrictEqual(g.timerKey(), before, 'timeout in ' + before + ' did not move the game on');
+      assert(g.timer.deadline || g.phase === 'over', 'a new countdown starts');
+      if (g.phase === 'over') break;
+    }
+    g.destroy();
+    for (const ph of ['setup', 'roll', 'robber', 'discard', 'roadBuilding']) assert(seen.has(ph), size + ': never saw ' + ph);
+    if (size === 'extended') assert(seen.has('special'));
+  }
+});
+
 console.log(`rules: ${passed} tests passed`);

@@ -81,7 +81,7 @@ function scheduleCleanup(room) {
   if (room.members.size > 0) return;
   // games can run long, so keep an empty room around for a while in case everyone reconnects
   room.cleanup = setTimeout(() => {
-    if (room.members.size === 0) rooms.delete(room.game.code);
+    if (room.members.size === 0) { room.game.destroy(); rooms.delete(room.game.code); }
   }, 2 * 60 * 60 * 1000);
 }
 

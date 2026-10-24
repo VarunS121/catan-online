@@ -129,6 +129,9 @@
   };
   $('lobby-size').onclick = e => { const b = e.target.closest('button'); if (b) emit('configure', { size: b.dataset.size }); };
   $('lobby-vp').onclick = e => { const b = e.target.closest('button'); if (b) emit('configure', { vpTarget: +b.dataset.vp }); };
+  $('lobby-time').onclick = e => { const b = e.target.closest('button'); if (b) emit('configure', { turnTime: +b.dataset.time }); };
+  $('lobby-discard').onclick = e => { const b = e.target.closest('button'); if (b) emit('configure', { discardLimit: +b.dataset.limit }); };
+  $('lobby-bank').onclick = e => { const b = e.target.closest('button'); if (b) emit('configure', { hideBank: b.dataset.hide === '1' }); };
   $('color-pick').onclick = e => { const b = e.target.closest('button'); if (b) emit('color', b.dataset.color); };
   $('start').onclick = () => emit('start');
   $('leave-lobby').onclick = () => { emit('leave'); store.del('catan.room'); history.replaceState(null, '', '/'); state = null; show('home'); };
@@ -143,6 +146,9 @@
     $('host-settings').classList.toggle('locked', !host);
     for (const b of $('lobby-size').children) { b.classList.toggle('on', b.dataset.size === s.settings.size); b.disabled = !host; }
     for (const b of $('lobby-vp').children) { b.classList.toggle('on', +b.dataset.vp === s.settings.vpTarget); b.disabled = !host; }
+    for (const b of $('lobby-time').children) { b.classList.toggle('on', +b.dataset.time === s.settings.turnTime); b.disabled = !host; }
+    for (const b of $('lobby-discard').children) { b.classList.toggle('on', +b.dataset.limit === s.settings.discardLimit); b.disabled = !host; }
+    for (const b of $('lobby-bank').children) { b.classList.toggle('on', (b.dataset.hide === '1') === s.settings.hideBank); b.disabled = !host; }
     const [min, max] = s.settings.size === 'base' ? [2, 4] : [3, 6];
     const n = s.players.length;
     $('lobby-note').textContent = n < min ? `Waiting for players… (${n}/${min} needed)` : n > max ? `Too many players for this board (max ${max}).` : host ? 'Ready when you are! Share the invite link.' : 'Waiting for the host to start…';
@@ -437,7 +443,9 @@
 
   function renderBank() {
     const s = state;
-    $('bank').innerHTML = `<span title="Bank">🏦</span>` + RES.map(r => `<span title="${r} left in the bank">${ICON[r]}${s.bank[r]}</span>`).join('') + `<span title="Development cards left">📜${s.devLeft}</span><span title="Points to win">🏆${s.settings.vpTarget}</span>`;
+    const bank = s.bank ? RES.map(r => `<span title="${r} left in the bank">${ICON[r]}${s.bank[r]}</span>`).join('') : '<span title="Bank card counts are hidden in this game">hidden</span>';
+    $('bank').innerHTML = `<span title="Bank">🏦</span>` + bank + `<span title="Development cards left">📜${s.devLeft}</span><span title="Points to win">🏆${s.settings.vpTarget}</span>`;
+    $('help-limit').textContent = s.settings.discardLimit;
   }
 
   function renderLog() {
@@ -565,7 +573,8 @@
     show('game');
     if (state.phase !== 'main' && state.phase !== 'special') mode = null;
     if (state.phase !== 'main') tradeOpen = false;
-    $('banner').innerHTML = bannerText();
+    $('banner').innerHTML = bannerText() + '<span id="timer"></span>';
+    updateTimer();
     $('banner').className = state.actor === state.you || (state.phase === 'discard' && state.discards[state.you]) ? 'mine' : '';
     renderBoard();
     renderPlayers();
@@ -579,8 +588,23 @@
     renderModal();
   }
 
+  // turn countdown: the server sends time left, so client clock skew doesn't matter
+  let timerEnd = null, lastTick = null;
+  function updateTimer() {
+    const el = $('timer');
+    if (!el) return;
+    if (!timerEnd || !state || state.phase === 'over') { el.textContent = ''; return; }
+    const secs = Math.max(0, Math.ceil((timerEnd - Date.now()) / 1000));
+    el.textContent = ` ⏱ ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    el.className = secs <= 10 ? 'low' : '';
+    const waitingOnMe = state.actor === state.you || (state.phase === 'discard' && state.discards[state.you]) || (['robber', 'steal'].includes(state.phase) && state.current === state.you);
+    if (waitingOnMe && secs <= 5 && secs > 0 && secs !== lastTick) { lastTick = secs; beep(1000, 0.05, 'square', 0.04); }
+  }
+  setInterval(updateTimer, 250);
+
   net.on('state', s => {
     const prevActor = lastActor;
+    timerEnd = s.timeLeft != null ? Date.now() + s.timeLeft : null;
     state = s;
     lastActor = s.actor;
     if (s.phase !== 'lobby' && s.actor === s.you && prevActor !== s.you && s.phase !== 'over') {

@@ -11,7 +11,9 @@ const COSTS = {
 };
 const COLORS = ['#e23b3b', '#2f6fde', '#f2f2f2', '#f08a24', '#3aa655', '#8b5a2b'];
 const LIMITS = { base: { min: 2, max: 4 }, extended: { min: 3, max: 6 } };
-const DEV_NAMES = { knight: 'Knight', roadBuilding: 'Road Building', yearOfPlenty: 'Year of Plenty', monopoly: 'Monopoly', vp: 'Victory Point' };
+const TURN_TIMES = [0, 60, 90, 120, 180, 300]; // seconds, 0 = no timer
+const DISCARD_LIMITS = [7, 8, 9, 10, 12];      // on a 7, holding more than this means discarding half
+const DEV_NAMES ={ knight: 'Knight', roadBuilding: 'Road Building', yearOfPlenty: 'Year of Plenty', monopoly: 'Monopoly', vp: 'Victory Point' };
 
 const emptyHand = () => ({ wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 });
 const total = hand => RESOURCES.reduce((s, r) => s + (hand[r] || 0), 0);
@@ -34,7 +36,14 @@ const handText = h => RESOURCES.filter(r => h[r]).map(r => `${h[r]} ${r}`).join(
 class Game {
   constructor(code, settings, hooks = {}) {
     this.code = code;
-    this.settings = { size: settings.size === 'extended' ? 'extended' : 'base', vpTarget: settings.vpTarget || 10 };
+    this.settings = {
+      size: settings.size === 'extended' ? 'extended' : 'base',
+      vpTarget: settings.vpTarget || 10,
+      turnTime: TURN_TIMES.includes(settings.turnTime) ? settings.turnTime : 0,
+      discardLimit: DISCARD_LIMITS.includes(settings.discardLimit) ? settings.discardLimit : 7,
+      hideBank: !!settings.hideBank, // hide how many resource cards are left in the bank
+    };
+    this.timer = { key: null, handle: null, deadline: null };
     this.hooks = { changed() {}, fx() {}, ...hooks };
     this.players = [];   // seat order (randomised at start)
     this.spectators = new Map();
@@ -84,10 +93,9 @@ class Game {
     if (s.size === 'base' || s.size === 'extended') this.settings.size = s.size;
     const vp = Math.floor(Number(s.vpTarget));
     if (vp >= 5 && vp <= 20) this.settings.vpTarget = vp;
-    if (s.color && COLORS.includes(s.color)) {
-      const me = this.findPlayer(id);
-      if (!this.players.some(p => p.color === s.color && p !== me)) me.color = s.color;
-    }
+    if (s.turnTime != null && TURN_TIMES.includes(+s.turnTime)) this.settings.turnTime = +s.turnTime;
+    if (s.discardLimit != null && DISCARD_LIMITS.includes(+s.discardLimit)) this.settings.discardLimit = +s.discardLimit;
+    if (typeof s.hideBank === 'boolean') this.settings.hideBank = s.hideBank;
     this.hooks.changed();
     return null;
   }
@@ -134,6 +142,7 @@ class Game {
     this.setup = { order: [...this.players.keys(), ...[...this.players.keys()].reverse()], idx: 0, step: 'settlement', last: null };
     this.phase = 'setup';
     this.addLog(`Game started on the ${big ? '5–6 player' : 'base'} board. ${this.players[0].name} places first.`);
+    this.syncTimer();
     this.hooks.changed();
     return null;
   }
@@ -286,8 +295,93 @@ class Game {
     }[type];
     if (!handler) return 'Unknown action';
     const err = handler.call(this, this.findPlayer(id), d);
-    if (!err) this.hooks.changed();
+    if (!err) { this.syncTimer(); this.hooks.changed(); }
     return err || null;
+  }
+
+  // ---------- turn timer ----------
+  // One countdown per decision the game is waiting on. Building and trading in the main
+  // phase share a single countdown, so playing a card can't buy extra time.
+  timerKey() {
+    if (this.phase === 'lobby' || this.phase === 'over') return null;
+    if (this.phase === 'discard') return `discard:${this.turnNumber}`;
+    const setup = this.setup ? `${this.setup.idx}${this.setup.step}` : '';
+    return `${this.phase}:${this.actorId()}:${this.turnNumber}:${setup}`;
+  }
+
+  syncTimer() {
+    const key = this.timerKey();
+    if (key === this.timer.key) return;
+    clearTimeout(this.timer.handle);
+    this.timer = { key, handle: null, deadline: null };
+    if (!key || !this.settings.turnTime) return;
+    const now = Date.now();
+    let deadline = now + this.settings.turnTime * 1000;
+    if (this.phase === 'main') {
+      if (this.mainDeadline && this.mainDeadline.turn === this.turnNumber) deadline = Math.max(this.mainDeadline.at, now + 10000);
+      else this.mainDeadline = { turn: this.turnNumber, at: deadline };
+    }
+    this.timer.deadline = deadline;
+    this.timer.handle = setTimeout(() => this.onTimeout(), deadline - now);
+    if (this.timer.handle.unref) this.timer.handle.unref();
+  }
+
+  // Time ran out: make a reasonable move for whoever we're waiting on.
+  onTimeout() {
+    this.timer.key = null; // force a fresh countdown even if the auto-move fails
+    const pick = arr => arr[crypto.randomInt(arr.length)];
+    if (this.phase === 'discard') {
+      for (const [id, n] of Object.entries(this.discards)) {
+        const p = this.findPlayer(id);
+        const pool = shuffle(RESOURCES.flatMap(r => Array(p.hand[r]).fill(r))).slice(0, n);
+        const cards = emptyHand();
+        pool.forEach(r => cards[r]++);
+        this.addLog(`⏱ ${p.name} ran out of time — cards discarded at random.`);
+        this.act(id, 'discard', { cards });
+      }
+      return this.syncTimer();
+    }
+    const p = this.findPlayer(this.phase === 'robber' || this.phase === 'steal' ? this.cur().id : this.actorId());
+    if (!p) return;
+    this.addLog(`⏱ ${p.name} ran out of time.`);
+    switch (this.phase) {
+      case 'setup': {
+        if (this.setup.step === 'settlement') {
+          // pick the spot touching the most production
+          const pips = n => (n ? 6 - Math.abs(7 - n) : 0);
+          const score = v => this.board.vertices[v].hexes.reduce((s, h) => s + pips(this.board.hexes[h].number), 0);
+          const spots = this.legalSettlements(p.id, false).sort((a, b) => score(b) - score(a));
+          this.act(p.id, 'build', { kind: 'settlement', at: spots[0] });
+        } else this.act(p.id, 'build', { kind: 'road', at: pick(this.legalRoads(p.id)) });
+        break;
+      }
+      case 'roll':
+        // an absent player rolls, and then their turn ends unless a 7 needs resolving
+        this.act(p.id, 'roll');
+        if (this.phase === 'main') this.act(p.id, 'endTurn');
+        break;
+      case 'main':
+      case 'special':
+        this.act(p.id, 'endTurn');
+        break;
+      case 'roadBuilding':
+        while (this.phase === 'roadBuilding') {
+          if (this.act(p.id, 'build', { kind: 'road', at: pick(this.legalRoads(p.id)) })) break;
+        }
+        break;
+      case 'robber': {
+        const hexes = this.board.hexes.filter(h => h.id !== this.board.robber);
+        const notMine = hexes.filter(h => !h.vertices.some(v => this.ownsAt(v, p.id)));
+        this.act(p.id, 'moveRobber', { hex: pick(notMine.length ? notMine : hexes).id });
+        if (this.phase === 'steal') this.act(p.id, 'steal', { victim: pick(this.stealCandidates) });
+        break;
+      }
+      case 'steal':
+        this.act(p.id, 'steal', { victim: pick(this.stealCandidates) });
+        break;
+    }
+    this.syncTimer();
+    this.hooks.changed();
   }
 
   doBuild(p, d) {
@@ -436,12 +530,12 @@ class Game {
     this.discards = {};
     for (const q of this.players) {
       const n = total(q.hand);
-      if (n > 7) this.discards[q.id] = Math.floor(n / 2);
+      if (n > this.settings.discardLimit) this.discards[q.id] = Math.floor(n / 2);
     }
     this.robberReturn = 'main';
     if (Object.keys(this.discards).length) {
       this.phase = 'discard';
-      this.addLog(`Players with more than 7 cards must discard half: ${Object.keys(this.discards).map(id => this.findPlayer(id).name).join(', ')}.`);
+      this.addLog(`Players with more than ${this.settings.discardLimit} cards must discard half: ${Object.keys(this.discards).map(id => this.findPlayer(id).name).join(', ')}.`);
     } else this.phase = 'robber';
   }
 
@@ -682,7 +776,7 @@ class Game {
       board: this.board,
       buildings: this.vertexBuilding,
       roads: this.edgeRoad,
-      bank: this.bank,
+      bank: this.settings.hideBank && this.phase !== 'over' ? null : this.bank,
       devLeft: this.devDeck.length,
       current: this.cur().id,
       actor,
@@ -698,6 +792,7 @@ class Game {
       offers: this.offers,
       winner: this.winner || null,
       rollCounts: this.rollCounts,
+      timeLeft: this.timer.deadline ? Math.max(0, this.timer.deadline - Date.now()) : null,
       log: this.log.filter(l => !l.to || l.to.includes(viewerId)).slice(-60),
     });
     if (me) {
@@ -720,7 +815,7 @@ class Game {
     return base;
   }
 
-  destroy() {}
+  destroy() { clearTimeout(this.timer.handle); }
 }
 
 module.exports = { Game, COSTS, total, emptyHand };
